@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 
 def call(method, url, body=None, auth=None):
@@ -125,6 +126,52 @@ def main():
     code, missing = call("GET", f"{FULFILLMENT}/fulfillments/{stock_id}")
     if code != 404:
         sys.exit(f"out-of-stock fulfillment should be absent, got {code} {missing}")
+
+    status, racer = call("POST", f"{LEDGER}/members", {"name": "Racer"})
+    if status != 201:
+        sys.exit(f"create racer -> {status} {racer}")
+    racer_id = racer["id"]
+
+    def earn_one(_):
+        return call("POST", f"{LEDGER}/members/{racer_id}/earn", {"points": 1})
+
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        earns = list(pool.map(earn_one, range(20)))
+    if [status for status, _ in earns].count(200) != 20:
+        sys.exit(f"concurrent earns -> {earns}")
+
+    def raced():
+        _, body = call("GET", f"{LEDGER}/members/{racer_id}")
+        if isinstance(body, dict) and body.get("balance") == 20:
+            return body
+        return None
+
+    until("concurrent earns", raced, seconds=20)
+
+    status, guarded = call("POST", f"{LEDGER}/members", {"name": "Guarded"})
+    if status != 201:
+        sys.exit(f"create guarded -> {status} {guarded}")
+    guarded_id = guarded["id"]
+    status, seeded = call("POST", f"{LEDGER}/members/{guarded_id}/earn", {"points": 20})
+    if status != 200 or seeded.get("balance") != 20:
+        sys.exit(f"seed guarded -> {status} {seeded}")
+
+    def redeem_ten(_):
+        return call(
+            "POST",
+            f"{LEDGER}/members/{guarded_id}/redeem",
+            {"points": 10, "rewardCode": "COFFEE"},
+        )
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        redeems = list(pool.map(redeem_ten, range(5)))
+    codes = [status for status, _ in redeems]
+    if codes.count(200) != 2 or codes.count(409) != 3:
+        sys.exit(f"overlapping redeems -> {codes}")
+    _, guarded_now = call("GET", f"{LEDGER}/members/{guarded_id}")
+    if guarded_now.get("balance") != 0:
+        sys.exit(f"guarded balance -> {guarded_now}")
+
     print(f"loyalty ledger smoke passed (dlq={depth})")
 
 

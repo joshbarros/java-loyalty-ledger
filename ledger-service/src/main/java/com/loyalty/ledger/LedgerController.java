@@ -52,10 +52,12 @@ public class LedgerController {
     @PostMapping("/members/{id}/earn")
     @Transactional
     public Member earn(@PathVariable String id, @RequestBody PointsRequest request) {
-        Member member = load(id);
         int points = request == null ? 0 : request.points();
-        member.setBalance(applyCredit(member.getBalance(), points));
-        members.save(member);
+        requirePositive(points);
+        if (members.credit(id, points) == 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "member not found");
+        }
+        Member member = load(id);
         publish(new LedgerEvent(UUID.randomUUID().toString(), id, "EARN", points, member.getBalance()));
         return member;
     }
@@ -66,10 +68,13 @@ public class LedgerController {
         if (request == null || blank(request.rewardCode())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rewardCode is required");
         }
-        Member member = load(id);
         int points = request.points();
-        member.setBalance(applyDebit(member.getBalance(), points));
-        members.save(member);
+        requirePositive(points);
+        if (members.debit(id, points) == 0) {
+            load(id);
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "insufficient balance");
+        }
+        Member member = load(id);
         String commandId = UUID.randomUUID().toString();
         String rewardCode = request.rewardCode().trim();
         publish(new LedgerEvent(commandId, id, "REDEEM", -points, member.getBalance()));
@@ -82,21 +87,11 @@ public class LedgerController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "member not found"));
     }
 
-    private static int applyCredit(int balance, int points) {
+    private static void requirePositive(int points) {
         try {
-            return PointsPolicy.credit(balance, points);
+            PointsPolicy.credit(0, points);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
-        }
-    }
-
-    private static int applyDebit(int balance, int points) {
-        try {
-            return PointsPolicy.debit(balance, points);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage());
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "insufficient balance");
         }
     }
 

@@ -42,7 +42,7 @@ sequenceDiagram
 
 ## Why two brokers
 
-Kafka is the log. Earn, redeem, and compensation are facts with a balance after each one. RabbitMQ is the work queue. Fulfillment either finishes or dead-letters. The compensation hop is how a failed task repairs the log without the fulfillment service writing the member balance itself.
+Kafka is the log. Earn, redeem, and compensation are facts with a balance after each one. Each of those writes the stored balance in one SQL statement, so overlapping requests add or subtract instead of overwriting each other. A redeem only subtracts when the balance still covers it. RabbitMQ is the work queue. Fulfillment either finishes or dead-letters. The compensation hop is how a failed task repairs the log without the fulfillment service writing the member balance itself.
 
 The debit is committed with the redeem request. There is no outbox. A crash after the debit and before the broker accepts the command leaves a balance that no longer matches the log. The smoke script covers the path that does complete: debit, fulfill, compensate, dead letter.
 
@@ -112,7 +112,7 @@ The Compose network is open. Do not publish these ports.
 
 ## Tests
 
-`mvn test` checks the debit and credit rules with no Docker. `./scripts/smoke.sh` earns 100, redeems 40 for `COFFEE`, waits for `SUCCESS`, redeems 10 for `OUT_OF_STOCK`, waits until the balance is 60 again, and checks that the failed command is dead-lettered.
+`mvn test` checks the debit and credit rules with no Docker. `./scripts/smoke.sh` earns 100, redeems 40 for `COFFEE`, waits for `SUCCESS`, redeems 10 for `OUT_OF_STOCK`, waits until the balance is 60 again, and checks that the failed command is dead-lettered. It then earns 1 point from 20 overlapping requests and expects 20, and redeems 10 five times against a balance of 20 and expects exactly two to land.
 
 ## Same shape, different domain
 

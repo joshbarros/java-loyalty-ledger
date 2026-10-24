@@ -28,10 +28,10 @@ public class CompensationWorker {
         if (appliedCommands.existsById(event.commandId())) {
             return;
         }
-        Member member = members.findById(event.memberId())
-                .orElseThrow(() -> new IllegalStateException("member missing for " + event.commandId()));
-        member.setBalance(PointsPolicy.credit(member.getBalance(), event.points()));
-        members.save(member);
+        PointsPolicy.credit(0, event.points());
+        if (members.credit(event.memberId(), event.points()) == 0) {
+            throw new IllegalStateException("member missing for " + event.commandId());
+        }
         AppliedCommand applied = new AppliedCommand();
         applied.setCommandId(event.commandId());
         appliedCommands.save(applied);
